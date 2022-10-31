@@ -16,6 +16,7 @@ import re
 import sys
 import time
 import traceback
+import hashlib
 
 
 import fantiadl
@@ -52,7 +53,19 @@ MIMETYPES = {
     "video/webm": ".webm"
 }
 
-UNICODE_CONTROL_MAP = dict.fromkeys(range(32))
+SANITIZATION_MAP = {
+    ord("<"): "＜",
+    ord(">"): "＞",
+    ord(":"): "：",
+    ord("\""): "＂",
+    ord("/"): "／",
+    ord("\\"): "＼",
+    ord("|"): "｜",
+    ord("?"): "？",
+    ord("*"): "＊",
+    **dict.fromkeys(range(32)),
+    0x7f: None,
+}
 
 
 class FantiaClub:
@@ -477,11 +490,20 @@ def guess_extension(mimetype, download_url):
             extension = ".unknown"
     return extension
 
-def sanitize_for_path(value, replace=' '):
-    """Remove potentially illegal characters from a path."""
-    sanitized = re.sub(r'[<>\"\?\\\/\*:|]', replace, value)
-    sanitized = sanitized.translate(UNICODE_CONTROL_MAP)
-    return re.sub(r'[\s.]+$', '', sanitized)
+def sanitize_for_path(value, maxlen=255):
+    """
+    1. Replace potentially illegal characters with full-width versions or remove them
+    2. Shrink the length to fit max characters limit, adding some hash to avoid conflicts
+    """
+    sanitized = value.translate(SANITIZATION_MAP)
+    sanitized = re.sub(r'[\s.]+$', '', sanitized)
+    if len(sanitized.encode()) <= maxlen:
+        return sanitized
+    L = (maxlen-10)//4
+    left, right = sanitized[:L], sanitized[L:]
+    m = hashlib.md5()
+    m.update(right.encode())
+    return left + '___' + m.hexdigest()[:7]
 
 def build_crawljob(links, root_directory, post_directory):
     """Append to a root .crawljob file with external links gathered from a post."""
